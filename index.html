@@ -688,6 +688,7 @@ function initMap() {
 // GRID RENDERING
 // ════════════════════════════════════════════════════════════
 function renderGrid() {
+  if (!gridLayer) return; // map not initialised yet (Firebase listener may fire early)
   gridLayer.clearLayers();
   if (map.getZoom() < 9) return;
   const bounds  = map.getBounds();
