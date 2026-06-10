@@ -1,0 +1,11 @@
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/survey-grid.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/survey-sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
