@@ -1,6 +1,6 @@
-const CACHE = 'ukgrid-v7';
+const CACHE = 'ukgrid-v8';
 const PRECACHE = [
-  './survey-grid.html',
+  './index.html',
   './survey-manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
