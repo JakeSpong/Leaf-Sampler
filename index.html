@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>UK Survey Grid</title>
+
+<!-- PWA -->
+<link rel="manifest" href="survey-manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="UK·GRID">
+<meta name="theme-color" content="#0f1a0f">
+<link rel="apple-touch-icon" href="survey-icon-192.png">
+<link rel="icon" type="image/png" href="survey-icon-192.png">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<!-- Firebase v10 (modular CDN build) -->
+<script type="module">
+import { initializeApp }         from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteField,
+         collection, getDocs, onSnapshot }
+  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+// Expose to global scope so non-module code can use it
+window._fbReady = false;
+window._fbInitError = null;
+
+window._initFirebase = function(config) {
+  try {
+    const app = initializeApp(config);
+    const db  = getFirestore(app);
+    window._db = db;
+
+    // Expose Firestore helpers globally
+    window._fsDoc        = (path)          => doc(db, ...path.split('/'));
+    window._fsGetDoc     = (ref)           => getDoc(ref);
+    window._fsSetDoc     = (ref, data, opts) => setDoc(ref, data, opts || {});
+    window._fsUpdateDoc  = (ref, data)     => updateDoc(ref, data);
+    window._fsDeleteField = ()             => deleteField();
+    window._fsCollection = (path)          => collection(db, path);
+    window._fsGetDocs    = (ref)           => getDocs(ref);
+    window._fsOnSnapshot = (ref, cb)       => onSnapshot(ref, cb);
+
+    window._fbReady = true;
+    console.log('Firebase initialised');
+    if (window._fbReadyCb) window._fbReadyCb();
+  } catch(e) {
+    window._fbInitError = e.message;
+    console.error('Firebase init failed:', e);
+    if (window._fbReadyCb) window._fbReadyCb(e);
+  }
+};
+</script>
+<style>
+  :root {
+    --ink:      #0f1a0f;
+    --paper:    #f4f7f2;
+    --low:      #ffd8a8;
+    --high:     #52a354;
+    --accent:   #1a6b3a;
+    --danger:   #8b3a1a;
+    --code-bg:  #0f1a0f;
+    --code-fg:  #a8e6b0;
+    --shadow:   0 2px 16px rgba(15,26,15,0.18);
+    --radius:   10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Space Grotesk', sans-serif; background: var(--ink); color: var(--ink); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* HEADER */
+  header { background: var(--ink); color: var(--paper); padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; border-bottom: 1px solid #2a3d2a; gap: 8px; }
+  .logo { display:flex; align-items:baseline; gap:8px; flex-shrink:0; }
+  .logo-title { font-family:'Space Mono',monospace; font-size:0.95rem; color:var(--paper); }
+  .logo-sub { font-size:0.6rem; color:#6a8a6a; letter-spacing:0.08em; text-transform:uppercase; }
+
+  /* Search bar in header */
+  #search-wrap { flex:1; max-width:320px; position:relative; }
+  #search-input {
+    width:100%; padding:6px 32px 6px 10px;
+    background:#1a2e1a; border:1px solid #2a3d2a; border-radius:20px;
+    color:var(--paper); font-family:'Space Grotesk',sans-serif; font-size:0.75rem;
+    outline:none;
+  }
+  #search-input::placeholder { color:#4a6a4a; }
+  #search-input:focus { border-color:var(--accent); }
+  #search-clear { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:#4a6a4a; cursor:pointer; font-size:0.9rem; display:none; }
+  #search-results {
+    position:absolute; top:calc(100% + 4px); left:0; right:0;
+    background:#141e14; border:1px solid #2a4a2a; border-radius:10px;
+    z-index:2000; max-height:200px; overflow-y:auto;
+    box-shadow:var(--shadow); display:none;
+  }
+  #search-results.open { display:block; }
+  .sr-item { padding:8px 12px; font-size:0.75rem; color:var(--paper); cursor:pointer; border-bottom:1px solid #1a2e1a; }
+  .sr-item:hover { background:#1a2e1a; }
+  .sr-item:last-child { border-bottom:none; }
+  .sr-type { font-size:0.6rem; color:#4a8a4a; margin-left:4px; }
+
+  #gps-pill { display:flex; align-items:center; gap:5px; background:#1a2e1a; border-radius:20px; padding:4px 10px; font-size:0.65rem; color:#6a8a6a; font-family:'Space Mono',monospace; flex-shrink:0; }
+  .gps-dot { width:6px; height:6px; border-radius:50%; background:#444; flex-shrink:0; }
+  .gps-dot.ok  { background:var(--high); animation:pulse 2s infinite; }
+  .gps-dot.err { background:#e05050; }
+  @keyframes pulse { 0%,100%{opacity:1;}50%{opacity:0.4;} }
+
+  /* MAP */
+  #map-wrap { flex:1; position:relative; overflow:hidden; }
+  #map { width:100%; height:100%; }
+
+  #locate-btn { position:absolute; bottom:24px; right:14px; width:44px; height:44px; background:var(--accent); border:none; border-radius:50%; color:#fff; font-size:1.2rem; cursor:pointer; box-shadow:var(--shadow); z-index:900; display:flex; align-items:center; justify-content:center; transition:background 0.2s; }
+  #locate-btn:hover { background:#135429; }
+
+  #pin-banner { position:absolute; top:12px; left:50%; transform:translateX(-50%); background:var(--accent); color:#fff; border-radius:20px; padding:7px 18px; font-size:0.75rem; z-index:900; display:none; white-space:nowrap; box-shadow:var(--shadow); pointer-events:none; }
+  #pin-banner.visible { display:block; }
+
+  /* BOTTOM PANEL */
+  #bottom-panel { background:var(--ink); border-top:1px solid #2a3d2a; flex-shrink:0; padding:10px 14px 12px; display:flex; flex-direction:column; gap:8px; }
+  .panel-row { display:flex; gap:8px; align-items:center; }
+
+  .btn { padding:10px 14px; border:none; border-radius:var(--radius); font-family:'Space Grotesk',sans-serif; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
+  #add-pin-btn { flex:1; background:var(--accent); color:#fff; }
+  #add-pin-btn:hover { background:#135429; }
+  #add-pin-btn.active { background:var(--danger); box-shadow:0 0 0 2px #e06030; }
+  #my-pins-btn { background:#1a2e1a; color:#a0c4a0; border:1px solid #2a3d2a; font-family:'Space Mono',monospace; font-size:0.7rem; }
+  #my-pins-btn.active, #my-pins-btn:hover { background:#243d24; color:var(--paper); border-color:var(--accent); }
+  #admin-btn { background:#1a2e1a; color:#6a8a6a; border:1px solid #2a3d2a; font-family:'Space Mono',monospace; font-size:0.7rem; }
+  #admin-btn:hover { background:#243d24; color:var(--paper); border-color:var(--accent); }
+
+  .legend { display:flex; gap:12px; align-items:center; }
+  .legend-item { display:flex; align-items:center; gap:5px; font-size:0.6rem; color:#6a8a6a; font-family:'Space Mono',monospace; }
+  .legend-swatch { width:13px; height:13px; border-radius:3px; border:1px solid rgba(255,255,255,0.1); }
+
+  /* PINS DRAWER */
+  #pins-drawer { display:none; flex-direction:column; max-height:200px; overflow-y:auto; border-top:1px solid #2a3d2a; padding-top:8px; gap:5px; }
+  #pins-drawer.open { display:flex; }
+  .pin-row { display:flex; align-items:center; gap:8px; padding:7px 10px; background:#1a2e1a; border-radius:8px; cursor:pointer; transition:background 0.15s; }
+  .pin-row:hover { background:#243d24; }
+  .pin-code { font-family:'Space Mono',monospace; font-size:0.85rem; font-weight:700; color:var(--code-fg); letter-spacing:0.1em; flex-shrink:0; background:var(--code-bg); border:1px solid #2a4a2a; border-radius:6px; padding:3px 7px; }
+  .pin-meta { flex:1; min-width:0; }
+  .pin-coords { font-size:0.62rem; color:#6a8a6a; font-family:'Space Mono',monospace; }
+  .pin-date { font-size:0.58rem; color:#4a6a4a; margin-top:1px; }
+  .pin-actions { display:flex; gap:4px; flex-shrink:0; }
+  .pin-doc-btn { background:none; border:1px solid #2a4a2a; border-radius:6px; color:#4a9a6a; font-size:0.6rem; padding:3px 6px; cursor:pointer; font-family:'Space Mono',monospace; }
+  .pin-doc-btn:hover { background:#1a3a2a; }
+  .pin-del { background:none; border:1px solid #3a2020; border-radius:6px; color:#a05050; font-size:0.6rem; padding:3px 6px; cursor:pointer; font-family:'Space Mono',monospace; }
+  .pin-del:hover { background:#3a1a1a; }
+
+  /* CODE TOAST */
+  #code-toast { position:absolute; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--code-bg); border:1px solid #2a4a2a; border-radius:14px; padding:14px 20px; z-index:1000; opacity:0; transition:all 0.35s; pointer-events:none; text-align:center; min-width:230px; box-shadow:var(--shadow); }
+  #code-toast.show { opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto; }
+  .ct-label { font-size:0.58rem; letter-spacing:0.14em; text-transform:uppercase; color:#4a7a4a; font-family:'Space Mono',monospace; margin-bottom:3px; }
+  .ct-code { font-family:'Space Mono',monospace; font-size:2rem; font-weight:700; color:var(--code-fg); letter-spacing:0.2em; }
+  .ct-sub { font-size:0.6rem; color:#4a7a4a; margin-top:4px; line-height:1.5; }
+  .ct-btns { display:flex; gap:6px; margin-top:10px; }
+  .ct-btns button { flex:1; padding:6px 10px; border:none; border-radius:6px; font-size:0.7rem; font-family:'Space Grotesk',sans-serif; cursor:pointer; transition:background 0.2s; }
+  #ct-copy-btn { background:var(--accent); color:#fff; }
+  #ct-copy-btn:hover { background:#135429; }
+  #ct-doc-btn { background:#1a3a5a; color:#a0c8f0; border:1px solid #2a4a6a; }
+  #ct-doc-btn:hover { background:#1a4a7a; }
+  #ct-dismiss-btn { background:#1a2e1a; color:#6a8a6a; border:1px solid #2a3d2a; }
+
+  /* ADMIN PANEL */
+  #admin-panel { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:3000; align-items:flex-start; justify-content:center; padding:20px; overflow-y:auto; }
+  #admin-panel.open { display:flex; }
+  #admin-box { background:#141e14; border:1px solid #2a4a2a; border-radius:14px; padding:20px; max-width:500px; width:100%; box-shadow:var(--shadow); margin:auto; }
+  #admin-box h2 { font-family:'Space Mono',monospace; color:var(--paper); font-size:0.95rem; margin-bottom:4px; }
+  #admin-box p { font-size:0.7rem; color:#6a8a6a; margin-bottom:14px; }
+  .admin-stats { display:flex; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .admin-stat { background:#1a2e1a; border:1px solid #2a3d2a; border-radius:8px; padding:8px 14px; text-align:center; }
+  .admin-stat strong { display:block; font-family:'Space Mono',monospace; font-size:1.3rem; color:var(--code-fg); }
+  .admin-stat span { font-size:0.6rem; color:#6a8a6a; text-transform:uppercase; letter-spacing:0.08em; }
+  .admin-section { margin-bottom:14px; }
+  .admin-section h3 { font-size:0.72rem; color:#6a8a6a; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:8px; font-family:'Space Mono',monospace; }
+  .admin-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+  .admin-input { flex:1; min-width:140px; padding:7px 10px; background:#0f1a0f; border:1px solid #2a3d2a; border-radius:8px; color:var(--paper); font-family:'Space Mono',monospace; font-size:0.72rem; outline:none; }
+  .admin-input:focus { border-color:var(--accent); }
+  .admin-input::placeholder { color:#3a5a3a; }
+  .admin-btn { padding:7px 14px; border:none; border-radius:8px; font-family:'Space Grotesk',sans-serif; font-size:0.72rem; font-weight:600; cursor:pointer; transition:background 0.2s; white-space:nowrap; }
+  .admin-btn-green { background:var(--accent); color:#fff; }
+  .admin-btn-green:hover { background:#135429; }
+  .admin-btn-blue { background:#1a3a5a; color:#a0c8f0; border:1px solid #2a4a6a; }
+  .admin-btn-blue:hover { background:#1a4a7a; }
+  .admin-btn-grey { background:#1a2e1a; color:#a0c4a0; border:1px solid #2a3d2a; }
+  .admin-btn-grey:hover { background:#243d24; }
+  #admin-close { float:right; background:none; border:none; color:#6a8a6a; font-size:1.2rem; cursor:pointer; margin-top:-4px; }
+  .admin-pin-list { max-height:220px; overflow-y:auto; border:1px solid #2a3d2a; border-radius:8px; }
+  .admin-pin-row { display:flex; gap:8px; align-items:center; padding:6px 10px; border-bottom:1px solid #1a2e1a; font-size:0.65rem; color:#a0c4a0; font-family:'Space Mono',monospace; }
+  .admin-pin-row:last-child { border-bottom:none; }
+  .admin-pin-row .acode { color:var(--code-fg); font-weight:700; flex-shrink:0; }
+  .admin-pin-row .ameta { flex:1; color:#6a8a6a; }
+  #gdoc-url-saved { font-size:0.62rem; color:var(--high); margin-top:4px; display:none; }
+
+  /* Popup */
+  .leaflet-popup-content-wrapper { background:var(--code-bg) !important; border:1px solid #2a4a2a !important; border-radius:10px !important; box-shadow:var(--shadow) !important; font-family:'Space Grotesk',sans-serif !important; }
+  .leaflet-popup-content { margin:12px 14px !important; min-width:170px; }
+  .leaflet-popup-tip { background:var(--code-bg) !important; }
+  .popup-code { font-family:'Space Mono',monospace; font-size:1.05rem; color:var(--code-fg); font-weight:700; letter-spacing:0.12em; margin-bottom:4px; }
+  .popup-row { font-size:0.67rem; color:#6a8a6a; margin-bottom:2px; }
+  .popup-btns { display:flex; gap:6px; margin-top:8px; }
+  .popup-doc-btn { flex:1; padding:6px; background:#1a3a2a; border:1px solid #2a5a3a; border-radius:6px; color:#80c8a0; font-size:0.65rem; font-family:'Space Grotesk',sans-serif; cursor:pointer; }
+  .popup-del-btn { flex:1; padding:6px; background:#2a1a1a; border:1px solid #4a2a2a; border-radius:6px; color:#c06060; font-size:0.65rem; font-family:'Space Grotesk',sans-serif; cursor:pointer; }
+
+  /* Grid cell colours */
+  .grid-cell { stroke:#8aaa8a; stroke-width:0.5; stroke-opacity:0.4; }
+  .grid-empty   { fill:white;    fill-opacity:0.06; }
+  .grid-low     { fill:#ffd8a8;  fill-opacity:0.55; }
+  .grid-high    { fill:#52a354;  fill-opacity:0.60; }
+
+  /* Loading */
+  #loading { position:absolute; inset:0; background:rgba(15,26,15,0.85); display:flex; align-items:center; justify-content:center; z-index:2000; color:var(--paper); font-family:'Space Mono',monospace; font-size:0.75rem; letter-spacing:0.06em; flex-direction:column; gap:12px; }
+  .spin { width:26px; height:26px; border:2px solid #2a4a2a; border-top-color:var(--high); border-radius:50%; animation:spin 0.8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg);} }
+  #loading.gone { display:none; }
+
+  /* Modal */
+  #modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:4000; align-items:center; justify-content:center; padding:20px; }
+  #modal.open { display:flex; }
+  #modal-box { background:#141e14; border:1px solid #2a4a2a; border-radius:14px; padding:20px; max-width:300px; width:100%; box-shadow:var(--shadow); }
+  #modal-box h3 { color:var(--paper); font-size:0.9rem; margin-bottom:8px; }
+  #modal-box p  { color:#6a8a6a; font-size:0.72rem; line-height:1.5; margin-bottom:14px; }
+  .modal-btns { display:flex; gap:8px; }
+  .modal-btns button { flex:1; padding:9px; border:none; border-radius:8px; font-family:'Space Grotesk',sans-serif; font-size:0.75rem; cursor:pointer; }
+  #modal-ok     { background:var(--accent); color:#fff; }
+  #modal-cancel { background:#1a2e1a; color:#a0c4a0; border:1px solid #2a4a2a; }
+
+  @media (orientation:landscape) {
+    #bottom-panel { padding:6px 14px 8px; gap:6px; }
+    .legend { display:none; }
+    #pins-drawer { max-height:120px; }
+  }
+
+  /* Firebase setup modal */
+  #fb-setup { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9000; align-items:center; justify-content:center; padding:20px; }
+  #fb-setup.open { display:flex; }
+  #fb-box { background:#141e14; border:1px solid #2a4a2a; border-radius:14px; padding:22px; max-width:420px; width:100%; box-shadow:0 4px 32px rgba(0,0,0,0.5); }
+  #fb-box h2 { font-family:'Space Mono',monospace; color:var(--paper); font-size:0.95rem; margin-bottom:6px; }
+  #fb-box p  { font-size:0.7rem; color:#6a8a6a; line-height:1.6; margin-bottom:10px; }
+  .fb-step { background:#0f1a0f; border:1px solid #2a3d2a; border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.68rem; color:#a0c4a0; line-height:1.7; }
+  .fb-step strong { color:var(--code-fg); }
+  .fb-step code { background:#1a2e1a; border-radius:4px; padding:1px 5px; font-family:'Space Mono',monospace; font-size:0.65rem; color:#a8e6b0; }
+  #fb-config-input { width:100%; min-height:90px; padding:8px 10px; background:#0f1a0f; border:1px solid #2a3d2a; border-radius:8px; color:var(--paper); font-family:'Space Mono',monospace; font-size:0.65rem; outline:none; resize:vertical; margin-bottom:8px; }
+  #fb-config-input:focus { border-color:var(--accent); }
+  #fb-config-input::placeholder { color:#3a5a3a; }
+  .fb-btns { display:flex; gap:8px; }
+  #fb-save-btn { flex:1; padding:10px; background:var(--accent); color:#fff; border:none; border-radius:8px; font-family:'Space Grotesk',sans-serif; font-size:0.78rem; font-weight:600; cursor:pointer; }
+  #fb-save-btn:hover { background:#135429; }
+  #fb-skip-btn { padding:10px 14px; background:#1a2e1a; color:#6a8a6a; border:1px solid #2a3d2a; border-radius:8px; font-family:'Space Grotesk',sans-serif; font-size:0.75rem; cursor:pointer; }
+  .fb-status { display:flex; align-items:center; gap:6px; font-size:0.65rem; font-family:'Space Mono',monospace; margin-bottom:6px; }
+  .fb-dot { width:7px; height:7px; border-radius:50%; background:#444; flex-shrink:0; }
+  .fb-dot.ok   { background:#52a354; }
+  .fb-dot.err  { background:#e05050; }
+  .fb-dot.wait { background:#c9a84c; animation:pulse 1.5s infinite; }
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="logo-title">UK·GRID</span>
+    <span class="logo-sub">Survey</span>
+  </div>
+  <div id="search-wrap">
+    <input type="text" id="search-input" placeholder="Search location…" autocomplete="off" spellcheck="false">
+    <button id="search-clear" title="Clear">✕</button>
+    <div id="search-results"></div>
+  </div>
+  <div id="gps-pill">
+    <div class="gps-dot" id="gps-dot"></div>
+    <span id="gps-text">no GPS</span>
+  </div>
+  <div id="fb-pill" class="fb-status" style="cursor:pointer;" onclick="openFbSetup()" title="Firebase connection">
+    <div class="fb-dot wait" id="fb-dot"></div>
+    <span id="fb-text" style="color:#6a8a6a;">db</span>
+  </div>
+</header>
+
+<div id="map-wrap">
+  <div id="map"></div>
+  <div id="pin-banner">📍 Tap anywhere on the map to drop a pin</div>
+  <button id="locate-btn" title="Go to my location">◎</button>
+  <div id="code-toast">
+    <div class="ct-label">Pin code generated</div>
+    <div class="ct-code" id="ct-code-val">—</div>
+    <div class="ct-sub">Enter this code in the Google Doc<br>to record covariate data</div>
+    <div class="ct-btns">
+      <button id="ct-copy-btn">Copy code</button>
+      <button id="ct-doc-btn">Open Doc →</button>
+      <button id="ct-dismiss-btn">✕</button>
+    </div>
+  </div>
+  <div id="loading"><div class="spin"></div><span>Loading…</span></div>
+</div>
+
+<div id="bottom-panel">
+  <div class="panel-row">
+    <button class="btn" id="add-pin-btn">＋ Drop a Pin</button>
+    <button class="btn" id="my-pins-btn">My Pins</button>
+    <button class="btn" id="admin-btn">⬇ Export</button>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,255,255,0.15);"></div>0 pins</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#ffd8a8;opacity:0.85;"></div>1–9 pins</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#52a354;opacity:0.85;"></div>10+ pins</div>
+  </div>
+  <div id="pins-drawer"></div>
+</div>
+
+<!-- ADMIN PANEL -->
+<div id="admin-panel">
+  <div id="admin-box">
+    <button id="admin-close" onclick="closeAdmin()">✕</button>
+    <h2>⬇ Admin &amp; Export</h2>
+    <p>Manage your Google Doc link and export all pin data.</p>
+
+    <div class="admin-stats">
+      <div class="admin-stat"><strong id="adm-total">0</strong><span>My pins</span></div>
+      <div class="admin-stat"><strong id="adm-cells">0</strong><span>Grid cells</span></div>
+      <div class="admin-stat"><strong id="adm-global">0</strong><span>All-user pins</span></div>
+    </div>
+
+    <div class="admin-section">
+      <h3>Google Doc / Form URL</h3>
+      <p style="font-size:0.67rem;color:#6a8a6a;margin-bottom:6px;">Paste your Google Form or Doc URL. The pin code will be appended as a query parameter (<code style="color:#a8e6b0">?code=XXXXX</code>) so the form opens pre-filled.</p>
+      <div class="admin-row">
+        <input class="admin-input" id="gdoc-url-input" placeholder="https://docs.google.com/forms/…" type="url">
+        <button class="admin-btn admin-btn-green" onclick="saveGdocUrl()">Save</button>
+      </div>
+      <div id="gdoc-url-saved">✓ URL saved</div>
+    </div>
+
+    <div class="admin-section">
+      <h3>Export pins as CSV</h3>
+      <div class="admin-row">
+        <button class="admin-btn admin-btn-green" onclick="exportCSV('mine')">Download my pins</button>
+        <button class="admin-btn admin-btn-blue" onclick="exportCSV('all')">Download all pins</button>
+      </div>
+      <p style="font-size:0.62rem;color:#4a6a4a;margin-top:4px;">"All pins" includes every user's pins recorded in shared storage.</p>
+    </div>
+
+    <div class="admin-section">
+      <h3>My pins (<span id="adm-list-count">0</span>)</h3>
+      <div class="admin-pin-list" id="adm-pin-list"></div>
+    </div>
+
+    <div class="admin-row" style="margin-top:6px;">
+      <button class="admin-btn admin-btn-grey" onclick="closeAdmin()">Close</button>
+      <button class="admin-btn" style="background:#3a1a1a;color:#c06060;border:1px solid #5a2a2a;" onclick="confirmClearAll()">Clear all my pins</button>
+    </div>
+  </div>
+</div>
+
+<!-- FIREBASE SETUP MODAL -->
+<div id="fb-setup">
+  <div id="fb-box">
+    <h2>🔥 Connect Firebase</h2>
+    <p>For shared grid data across all users and devices, connect a free Firebase Firestore database. Your pin codes and coordinates are stored privately on your device — only the grid cell counts and anonymised pin records are shared.</p>
+
+    <div class="fb-step">
+      <strong>1.</strong> Go to <code>console.firebase.google.com</code> → Create a project (free Spark plan)<br>
+      <strong>2.</strong> Add a Web app → copy the <code>firebaseConfig</code> object<br>
+      <strong>3.</strong> Go to Firestore Database → Create database → Start in <strong>test mode</strong><br>
+      <strong>4.</strong> Paste the config JSON below and tap Save
+    </div>
+
+    <div class="fb-status" id="fb-current-status" style="display:none;">
+      <div class="fb-dot" id="fb-setup-dot"></div>
+      <span id="fb-setup-status-text"></span>
+    </div>
+
+    <textarea id="fb-config-input" placeholder='{
+  "apiKey": "AIza...",
+  "authDomain": "your-app.firebaseapp.com",
+  "projectId": "your-app",
+  "storageBucket": "your-app.appspot.com",
+  "messagingSenderId": "123456789",
+  "appId": "1:123:web:abc"
+}'></textarea>
+
+    <div class="fb-btns">
+      <button id="fb-save-btn" onclick="saveFbConfig()">Save &amp; Connect</button>
+      <button id="fb-skip-btn" onclick="closeFbSetup()">Use offline only</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modal">
+  <div id="modal-box">
+    <h3 id="modal-title">Confirm</h3>
+    <p id="modal-msg">Are you sure?</p>
+    <div class="modal-btns">
+      <button id="modal-cancel">Cancel</button>
+      <button id="modal-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// CONSTANTS
+// ════════════════════════════════════════════════════════════
+const GRID_KEY      = 'ukgrid_pins_v1';
+const COUNTS_KEY    = 'ukgrid_cellcounts_v1';
+const ALL_PINS_KEY  = 'ukgrid_all_pins_v1';   // shared: all users' pins (for export)
+const GDOC_KEY      = 'ukgrid_gdoc_url';
+const UK_BOUNDS     = { minLat:49.8, maxLat:60.9, minLng:-8.2, maxLng:2.0 };
+const DEG_LAT_PER_KM = 1 / 110.574;
+const DEG_LNG_PER_KM = lat => 1 / (111.320 * Math.cos(lat * Math.PI / 180));
+
+// ════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════
+let myPins     = [];
+let cellCounts = {};
+let allPins    = [];      // shared: every user's pins
+let gdocUrl    = 'https://docs.google.com/forms/d/e/1FAIpQLSfDFfIIcTlwGqyuwq-oIShAxLzqYw6oU1VSlRGnGYhINbM2Nw/viewform?usp=dialog';
+let userLatLng = null;
+let pinMode    = false;
+let showMyPins = false;
+let map, userMarker;
+let gridLayer  = null;
+let pinMarkers = {};
+let lastCode   = '';
+let searchTimer = null;
+
+try { myPins   = JSON.parse(localStorage.getItem(GRID_KEY)   || '[]'); } catch(e){}
+try { const saved = localStorage.getItem(GDOC_KEY); if (saved) gdocUrl = saved; } catch(e){}
+
+// ════════════════════════════════════════════════════════════
+// FIREBASE CONFIG & CONNECTION
+// ════════════════════════════════════════════════════════════
+const FB_CONFIG_KEY = 'ukgrid_fb_config';
+let fbConfig  = {
+  apiKey: "AIzaSyBXR2KX1gUFVj0a4fJYBwb2BPw3RfQhE84",
+  authDomain: "leaf-sampler.firebaseapp.com",
+  projectId: "leaf-sampler",
+  storageBucket: "leaf-sampler.firebasestorage.app",
+  messagingSenderId: "997722010688",
+  appId: "1:997722010688:web:e46a912c126e3dc81b1ba5"
+};
+let fbOnline  = false;   // true once Firestore is confirmed reachable
+
+function setFbStatus(state, text) {
+  const dot  = document.getElementById('fb-dot');
+  const txt  = document.getElementById('fb-text');
+  const sdot = document.getElementById('fb-setup-dot');
+  const stxt = document.getElementById('fb-setup-status-text');
+  if (dot)  dot.className  = `fb-dot ${state}`;
+  if (txt)  txt.textContent = text;
+  if (sdot) sdot.className = `fb-dot ${state}`;
+  if (stxt) stxt.textContent = text;
+  const row = document.getElementById('fb-current-status');
+  if (row) row.style.display = 'flex';
+}
+
+function saveFbConfig() {
+  const raw = document.getElementById('fb-config-input').value.trim();
+  let cfg;
+  try {
+    // Accept both bare object and JSON
+    cfg = JSON.parse(raw.replace(/^\s*const\s+\w+\s*=\s*/, '').replace(/;\s*$/, ''));
+  } catch(e) {
+    setFbStatus('err', 'Invalid JSON — check the config');
+    return;
+  }
+  if (!cfg.projectId || !cfg.apiKey) {
+    setFbStatus('err', 'Missing projectId or apiKey');
+    return;
+  }
+  fbConfig = cfg;
+  localStorage.setItem(FB_CONFIG_KEY, JSON.stringify(cfg));
+  setFbStatus('wait', 'Connecting…');
+  connectFirebase().then(ok => {
+    if (ok) { closeFbSetup(); showToast('✓ Firebase connected'); }
+  });
+}
+
+async function connectFirebase() {
+  if (!fbConfig) return false;
+  return new Promise(resolve => {
+    window._fbReadyCb = async (err) => {
+      if (err || !window._fbReady) {
+        setFbStatus('err', 'Connection failed');
+        fbOnline = false;
+        resolve(false);
+        return;
+      }
+      // Test connection with a small read
+      try {
+        const ref = window._fsDoc('_meta/ping');
+        await window._fsSetDoc(ref, { t: Date.now() }, { merge: true });
+        fbOnline = true;
+        setFbStatus('ok', 'connected');
+        // Start live listener for cell counts
+        startCountsListener();
+        resolve(true);
+      } catch(e) {
+        console.warn('Firestore test write failed:', e);
+        setFbStatus('err', e.code === 'permission-denied' ? 'Check Firestore rules' : 'Offline');
+        fbOnline = false;
+        resolve(false);
+      }
+    };
+    if (window._fbReady) {
+      window._fbReadyCb();
+    } else {
+      window._initFirebase(fbConfig);
+    }
+  });
+}
+
+function startCountsListener() {
+  if (!fbOnline) return;
+  try {
+    const ref = window._fsDoc('shared/cellCounts');
+    window._fsOnSnapshot(ref, snap => {
+      if (snap.exists()) {
+        cellCounts = snap.data();
+        renderGrid();
+      }
+    });
+    const pinsRef = window._fsDoc('shared/allPins');
+    window._fsOnSnapshot(pinsRef, snap => {
+      if (snap.exists()) allPins = Object.values(snap.data());
+    });
+  } catch(e) { console.warn('Listener error:', e); }
+}
+
+function openFbSetup() {
+  if (fbConfig) document.getElementById('fb-config-input').value = JSON.stringify(fbConfig, null, 2);
+  document.getElementById('fb-setup').classList.add('open');
+}
+function closeFbSetup() {
+  document.getElementById('fb-setup').classList.remove('open');
+  localStorage.setItem('ukgrid_setup_dismissed', '1');
+}
+
+// ════════════════════════════════════════════════════════════
+// STORAGE  (Firebase primary, localStorage fallback)
+// ════════════════════════════════════════════════════════════
+async function loadShared() {
+  // Try window.storage first (Claude context)
+  if (window.storage) {
+    try {
+      const counts = await window.storage.get(COUNTS_KEY, true);
+      cellCounts = counts ? JSON.parse(counts.value) : {};
+      const all  = await window.storage.get(ALL_PINS_KEY, true);
+      allPins    = all   ? JSON.parse(all.value)    : [];
+      setFbStatus('ok', 'claude-sync');
+      return;
+    } catch(e) {}
+  }
+  // Try Firebase
+  if (fbOnline) {
+    try {
+      const snap = await window._fsGetDoc(window._fsDoc('shared/cellCounts'));
+      cellCounts = snap.exists() ? snap.data() : {};
+      const psnap = await window._fsGetDoc(window._fsDoc('shared/allPins'));
+      allPins = psnap.exists() ? Object.values(psnap.data()) : [];
+      return;
+    } catch(e) { console.warn('Firebase load failed, using localStorage:', e); }
+  }
+  // Fallback: localStorage (single-device mode)
+  try {
+    const lc = localStorage.getItem(COUNTS_KEY);
+    cellCounts = lc ? JSON.parse(lc) : {};
+    const la = localStorage.getItem(ALL_PINS_KEY);
+    allPins   = la ? JSON.parse(la)  : [];
+  } catch(e) { cellCounts = {}; allPins = []; }
+}
+
+async function saveShared() {
+  // Merge this user's pins into shared record
+  const existCodes = new Set(allPins.map(p => p.code));
+  myPins.forEach(p => { if (!existCodes.has(p.code)) allPins.push(p); });
+
+  // window.storage (Claude context)
+  if (window.storage) {
+    try {
+      await window.storage.set(COUNTS_KEY,   JSON.stringify(cellCounts), true);
+      await window.storage.set(ALL_PINS_KEY,  JSON.stringify(allPins),   true);
+      return;
+    } catch(e) {}
+  }
+  // Firebase
+  if (fbOnline) {
+    try {
+      await window._fsSetDoc(window._fsDoc('shared/cellCounts'), cellCounts);
+      // Store allPins as a map keyed by code (Firestore document, not array)
+      const pinsMap = {};
+      allPins.forEach(p => { pinsMap[p.code] = p; });
+      await window._fsSetDoc(window._fsDoc('shared/allPins'), pinsMap);
+      return;
+    } catch(e) { console.warn('Firebase save failed, falling back:', e); }
+  }
+  // localStorage fallback
+  localStorage.setItem(COUNTS_KEY,  JSON.stringify(cellCounts));
+  localStorage.setItem(ALL_PINS_KEY, JSON.stringify(allPins));
+}
+
+async function deleteFromShared(code) {
+  allPins = allPins.filter(p => p.code !== code);
+  if (fbOnline) {
+    try {
+      const pinsRef = window._fsDoc('shared/allPins');
+      await window._fsUpdateDoc(pinsRef, { [code]: window._fsDeleteField() });
+    } catch(e) { console.warn('Firebase delete failed:', e); }
+  }
+  if (window.storage) {
+    try { await window.storage.set(ALL_PINS_KEY, JSON.stringify(allPins), true); } catch(e){}
+  } else {
+    localStorage.setItem(ALL_PINS_KEY, JSON.stringify(allPins));
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// GRID HELPERS
+// ════════════════════════════════════════════════════════════
+function cellId(lat, lng) {
+  const row = Math.floor(lat / DEG_LAT_PER_KM);
+  const col = Math.floor(lng / DEG_LNG_PER_KM(lat));
+  return `${row}:${col}`;
+}
+
+// ════════════════════════════════════════════════════════════
+// CODE GENERATION
+// ════════════════════════════════════════════════════════════
+function generateCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const existing = new Set(myPins.map(p=>p.code));
+  let code;
+  do { code = Array.from({length:5}, ()=>chars[Math.floor(Math.random()*chars.length)]).join(''); }
+  while (existing.has(code));
+  return code;
+}
+
+// ════════════════════════════════════════════════════════════
+// MAP
+// ════════════════════════════════════════════════════════════
+function initMap() {
+  map = L.map('map', { zoomControl:true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 }).addTo(map);
+  map.setView([54.5, -2.5], 6);
+  gridLayer = L.layerGroup().addTo(map);
+  map.on('moveend zoomend', debounce(renderGrid, 200));
+  map.on('click', onMapClick);
+  document.getElementById('locate-btn').onclick  = goToUser;
+  document.getElementById('add-pin-btn').onclick = togglePinMode;
+  document.getElementById('my-pins-btn').onclick = toggleMyPins;
+  document.getElementById('admin-btn').onclick   = openAdmin;
+  document.getElementById('ct-copy-btn').onclick = copyLastCode;
+  document.getElementById('ct-doc-btn').onclick  = openDocWithCode;
+  document.getElementById('ct-dismiss-btn').onclick = dismissCodeToast;
+  document.getElementById('loading').classList.add('gone');
+}
+
+// ════════════════════════════════════════════════════════════
+// GRID RENDERING
+// ════════════════════════════════════════════════════════════
+function renderGrid() {
+  gridLayer.clearLayers();
+  if (map.getZoom() < 9) return;
+  const bounds  = map.getBounds();
+  const latStep = DEG_LAT_PER_KM;
+  const latMin  = Math.floor(bounds.getSouth()/latStep)*latStep;
+  const latMax  = Math.ceil(bounds.getNorth()/latStep)*latStep;
+  for (let lat=latMin; lat<latMax; lat+=latStep) {
+    const lngStep = DEG_LNG_PER_KM(lat+latStep/2);
+    const lngMin  = Math.floor(bounds.getWest()/lngStep)*lngStep;
+    const lngMax  = Math.ceil(bounds.getEast()/lngStep)*lngStep;
+    for (let lng=lngMin; lng<lngMax; lng+=lngStep) {
+      const id    = cellId(lat+latStep*0.5, lng+lngStep*0.5);
+      const count = cellCounts[id]||0;
+      const cls   = count===0?'grid-empty':count<10?'grid-low':'grid-high';
+      L.rectangle([[lat,lng],[lat+latStep,lng+lngStep]],
+        { className:`grid-cell ${cls}`, interactive:false }).addTo(gridLayer);
+    }
+  }
+}
+
+function debounce(fn,ms){ let t; return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);}; }
+
+// ════════════════════════════════════════════════════════════
+// PIN MODE
+// ════════════════════════════════════════════════════════════
+function togglePinMode() {
+  pinMode = !pinMode;
+  const btn = document.getElementById('add-pin-btn');
+  btn.classList.toggle('active', pinMode);
+  btn.textContent = pinMode ? '✕ Cancel' : '＋ Drop a Pin';
+  document.getElementById('pin-banner').classList.toggle('visible', pinMode);
+  map.getContainer().style.cursor = pinMode ? 'crosshair' : '';
+}
+
+function onMapClick(e) {
+  if (!pinMode) return;
+  const {lat, lng} = e.latlng;
+  if (lat<UK_BOUNDS.minLat||lat>UK_BOUNDS.maxLat||lng<UK_BOUNDS.minLng||lng>UK_BOUNDS.maxLng) {
+    showToast('⚠ Pin must be within the UK'); return;
+  }
+  dropPin(lat, lng);
+  togglePinMode();
+}
+
+async function dropPin(lat, lng) {
+  const code = generateCode();
+  const cid  = cellId(lat, lng);
+  const pin  = { code, lat, lng, date:new Date().toISOString(), cellId:cid };
+  myPins.unshift(pin);
+  localStorage.setItem(GRID_KEY, JSON.stringify(myPins));
+  cellCounts[cid] = (cellCounts[cid]||0)+1;
+  await saveShared();
+  renderGrid();
+  addPinMarker(pin);
+  showCodeToast(code);
+  if (showMyPins) renderPinsDrawer();
+}
+
+// ════════════════════════════════════════════════════════════
+// PIN MARKERS
+// ════════════════════════════════════════════════════════════
+function makePinIcon(code) {
+  return L.divIcon({
+    className:'',
+    html:`<div style="background:#0f1a0f;border:2px solid #52a354;border-radius:8px 8px 8px 0;transform:rotate(-45deg);width:28px;height:28px;box-shadow:0 2px 8px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
+      <span style="transform:rotate(45deg);font-family:'Space Mono',monospace;font-size:6px;color:#a8e6b0;font-weight:700;letter-spacing:0.04em;">${code}</span></div>`,
+    iconSize:[28,28], iconAnchor:[0,28], popupAnchor:[14,-30]
+  });
+}
+
+function addPinMarker(pin) {
+  const m = L.marker([pin.lat,pin.lng],{icon:makePinIcon(pin.code)}).addTo(map);
+  m.bindPopup(()=>buildPinPopup(pin));
+  pinMarkers[pin.code] = m;
+}
+
+function buildPinPopup(pin) {
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="popup-code">${pin.code}</div>
+    <div class="popup-row">📍 ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}</div>
+    <div class="popup-row">📅 ${fmtDate(pin.date)}</div>
+    <div class="popup-btns">
+      <button class="popup-doc-btn" id="pdoc-${pin.code}">Open Doc</button>
+      <button class="popup-del-btn" id="pdel-${pin.code}">Delete</button>
+    </div>`;
+  setTimeout(()=>{
+    const db = document.getElementById(`pdoc-${pin.code}`);
+    const xb = document.getElementById(`pdel-${pin.code}`);
+    if (db) db.onclick = ()=>openDocForPin(pin.code);
+    if (xb) xb.onclick = ()=>confirmDelete(pin.code);
+  },30);
+  return div;
+}
+
+// ════════════════════════════════════════════════════════════
+// DELETE PIN
+// ════════════════════════════════════════════════════════════
+function confirmDelete(code) {
+  openModal('Delete pin?',
+    `Remove pin ${code}? This will reduce the count for its grid square.`,
+    ()=>deletePin(code));
+}
+
+async function deletePin(code) {
+  const pin = myPins.find(p=>p.code===code);
+  if (!pin) return;
+  myPins = myPins.filter(p=>p.code!==code);
+  localStorage.setItem(GRID_KEY, JSON.stringify(myPins));
+  if (cellCounts[pin.cellId]) {
+    cellCounts[pin.cellId] = Math.max(0, cellCounts[pin.cellId]-1);
+    if (!cellCounts[pin.cellId]) delete cellCounts[pin.cellId];
+  }
+  // Remove from shared storage (Firebase or fallback)
+  await deleteFromShared(code);
+  // Save updated counts
+  await saveShared();
+  if (pinMarkers[code]) { map.removeLayer(pinMarkers[code]); delete pinMarkers[code]; }
+  map.closePopup();
+  renderGrid();
+  if (showMyPins) renderPinsDrawer();
+  showToast('Pin deleted');
+}
+
+// ════════════════════════════════════════════════════════════
+// MY PINS DRAWER
+// ════════════════════════════════════════════════════════════
+function toggleMyPins() {
+  showMyPins = !showMyPins;
+  document.getElementById('my-pins-btn').classList.toggle('active', showMyPins);
+  document.getElementById('pins-drawer').classList.toggle('open', showMyPins);
+  if (showMyPins) renderPinsDrawer();
+}
+
+function renderPinsDrawer() {
+  const d = document.getElementById('pins-drawer');
+  if (!myPins.length) {
+    d.innerHTML=`<div style="font-size:0.7rem;color:#4a6a4a;padding:8px 4px;font-family:'Space Mono',monospace;">No pins yet.</div>`;
+    return;
+  }
+  d.innerHTML = myPins.map(p=>`
+    <div class="pin-row" onclick="flyToPin('${p.code}')">
+      <div class="pin-code">${p.code}</div>
+      <div class="pin-meta">
+        <div class="pin-coords">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</div>
+        <div class="pin-date">${fmtDate(p.date)}</div>
+      </div>
+      <div class="pin-actions">
+        <button class="pin-doc-btn" onclick="event.stopPropagation();openDocForPin('${p.code}')" title="Open Google Doc">📄</button>
+        <button class="pin-del"    onclick="event.stopPropagation();confirmDelete('${p.code}')">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function flyToPin(code) {
+  const p = myPins.find(p=>p.code===code);
+  if (!p) return;
+  map.flyTo([p.lat,p.lng],14,{animate:true,duration:0.8});
+  setTimeout(()=>{ if(pinMarkers[code]) pinMarkers[code].openPopup(); },900);
+}
+
+// ════════════════════════════════════════════════════════════
+// CODE TOAST
+// ════════════════════════════════════════════════════════════
+function showCodeToast(code) {
+  lastCode = code;
+  document.getElementById('ct-code-val').textContent = code;
+  document.getElementById('code-toast').classList.add('show');
+}
+function dismissCodeToast() { document.getElementById('code-toast').classList.remove('show'); }
+
+function copyLastCode() {
+  if (!lastCode) return;
+  navigator.clipboard.writeText(lastCode)
+    .then(()=>{ document.getElementById('ct-copy-btn').textContent='Copied ✓'; setTimeout(()=>document.getElementById('ct-copy-btn').textContent='Copy code',2000); })
+    .catch(()=>showToast('Code: '+lastCode));
+}
+
+function openDocWithCode()  { openDocForPin(lastCode); }
+function openDocForPin(code) {
+  if (!gdocUrl) {
+    showToast('⚠ No Google Doc URL set — add it in Export panel');
+    openAdmin(); return;
+  }
+  const sep = gdocUrl.includes('?') ? '&' : '?';
+  window.open(gdocUrl + sep + 'code=' + code, '_blank');
+}
+
+// ════════════════════════════════════════════════════════════
+// GOOGLE DOC URL
+// ════════════════════════════════════════════════════════════
+function saveGdocUrl() {
+  gdocUrl = document.getElementById('gdoc-url-input').value.trim();
+  localStorage.setItem(GDOC_KEY, gdocUrl);
+  const saved = document.getElementById('gdoc-url-saved');
+  saved.style.display = 'block';
+  setTimeout(()=>saved.style.display='none', 2500);
+}
+
+// ════════════════════════════════════════════════════════════
+// ADMIN PANEL
+// ════════════════════════════════════════════════════════════
+function openAdmin() {
+  // Populate URL field
+  document.getElementById('gdoc-url-input').value = gdocUrl;
+  // Stats
+  const globalTotal = Object.values(cellCounts).reduce((a,b)=>a+b, 0);
+  document.getElementById('adm-total').textContent   = myPins.length;
+  document.getElementById('adm-cells').textContent   = Object.keys(cellCounts).length;
+  document.getElementById('adm-global').textContent  = globalTotal;
+  document.getElementById('adm-list-count').textContent = myPins.length;
+  // Pin list
+  const list = document.getElementById('adm-pin-list');
+  if (!myPins.length) {
+    list.innerHTML = `<div style="padding:10px;font-size:0.65rem;color:#4a6a4a;font-family:'Space Mono',monospace;">No pins yet.</div>`;
+  } else {
+    list.innerHTML = myPins.map(p=>`
+      <div class="admin-pin-row">
+        <span class="acode">${p.code}</span>
+        <span class="ameta">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</span>
+        <span style="color:#4a6a4a;font-size:0.58rem;">${fmtDateShort(p.date)}</span>
+      </div>`).join('');
+  }
+  document.getElementById('admin-panel').classList.add('open');
+}
+
+function closeAdmin() { document.getElementById('admin-panel').classList.remove('open'); }
+
+// ════════════════════════════════════════════════════════════
+// CSV EXPORT
+// ════════════════════════════════════════════════════════════
+function exportCSV(mode) {
+  const pins = mode === 'all' ? allPins : myPins;
+  if (!pins.length) { showToast('No pins to export'); return; }
+  const rows = ['code,latitude,longitude,date,cell_id'];
+  pins.forEach(p => {
+    rows.push(`${p.code},${p.lat.toFixed(6)},${p.lng.toFixed(6)},${p.date},${p.cellId}`);
+  });
+  const csv  = rows.join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `ukgrid_${mode}_pins_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`✓ Exported ${pins.length} pins`);
+}
+
+function confirmClearAll() {
+  openModal('Clear all my pins?',
+    'This permanently removes all your pins from this device and reduces shared grid counts.',
+    async ()=>{
+      for (const p of [...myPins]) await deletePin(p.code);
+      closeAdmin(); openAdmin();
+      showToast('All pins cleared');
+    });
+}
+
+// ════════════════════════════════════════════════════════════
+// LOCATION SEARCH  (Nominatim / OpenStreetMap geocoder)
+// ════════════════════════════════════════════════════════════
+function initSearch() {
+  const input   = document.getElementById('search-input');
+  const results = document.getElementById('search-results');
+  const clear   = document.getElementById('search-clear');
+
+  input.addEventListener('input', ()=>{
+    const q = input.value.trim();
+    clear.style.display = q ? 'block' : 'none';
+    clearTimeout(searchTimer);
+    if (q.length < 2) { results.classList.remove('open'); return; }
+    searchTimer = setTimeout(()=>doSearch(q), 450);
+  });
+
+  input.addEventListener('keydown', e=>{
+    if (e.key === 'Escape') clearSearch();
+  });
+
+  clear.addEventListener('click', clearSearch);
+
+  // Close results on outside click
+  document.addEventListener('click', e=>{
+    if (!document.getElementById('search-wrap').contains(e.target)) {
+      results.classList.remove('open');
+    }
+  });
+}
+
+async function doSearch(query) {
+  const results = document.getElementById('search-results');
+  results.innerHTML = `<div class="sr-item" style="color:#4a6a4a;">Searching…</div>`;
+  results.classList.add('open');
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&countrycodes=gb&limit=6&format=json&addressdetails=1`;
+    const res = await fetch(url, { headers:{'Accept-Language':'en'} });
+    const data = await res.json();
+    if (!data.length) {
+      results.innerHTML = `<div class="sr-item" style="color:#4a6a4a;">No results found</div>`;
+      return;
+    }
+    results.innerHTML = data.map((item,i) => {
+      const type = item.type || item.class || '';
+      const name = item.display_name.split(',').slice(0,3).join(', ');
+      return `<div class="sr-item" data-i="${i}" data-lat="${item.lat}" data-lon="${item.lon}" data-bb='${JSON.stringify(item.boundingbox)}'>
+        ${name}<span class="sr-type">${type}</span>
+      </div>`;
+    }).join('');
+    results.querySelectorAll('.sr-item').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const lat = parseFloat(el.dataset.lat);
+        const lon = parseFloat(el.dataset.lon);
+        const bb  = JSON.parse(el.dataset.bb);
+        map.fitBounds([[parseFloat(bb[0]),parseFloat(bb[2])],[parseFloat(bb[1]),parseFloat(bb[3])]],
+          { maxZoom:15, animate:true });
+        clearSearch();
+      });
+    });
+  } catch(e) {
+    results.innerHTML = `<div class="sr-item" style="color:#a05050;">Search unavailable</div>`;
+  }
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-clear').style.display = 'none';
+  document.getElementById('search-results').classList.remove('open');
+}
+
+// ════════════════════════════════════════════════════════════
+// GPS
+// ════════════════════════════════════════════════════════════
+function initGPS() {
+  if (!navigator.geolocation) { document.getElementById('gps-text').textContent='unavailable'; return; }
+  navigator.geolocation.watchPosition(onGPS, onGPSErr, {enableHighAccuracy:true,maximumAge:10000,timeout:30000});
+}
+
+function onGPS(pos) {
+  const {latitude:lat,longitude:lng,accuracy:acc} = pos.coords;
+  userLatLng = {lat,lng};
+  document.getElementById('gps-dot').className = 'gps-dot ok';
+  document.getElementById('gps-text').textContent = `±${Math.round(acc)}m`;
+  if (!userMarker) userMarker = L.circleMarker([lat,lng],{radius:8,color:'#1a7abf',fillColor:'#5ab4f0',fillOpacity:0.9,weight:2}).addTo(map);
+  else userMarker.setLatLng([lat,lng]);
+}
+
+function onGPSErr(e) {
+  document.getElementById('gps-dot').className = 'gps-dot err';
+  document.getElementById('gps-text').textContent = ({1:'blocked',2:'unavailable',3:'timed out'})[e.code]||'error';
+}
+
+function goToUser() {
+  if (userLatLng) map.flyTo([userLatLng.lat,userLatLng.lng],14,{animate:true,duration:1});
+  else showToast('⚠ GPS not available yet');
+}
+
+// ════════════════════════════════════════════════════════════
+// MODAL
+// ════════════════════════════════════════════════════════════
+function openModal(title,msg,cb) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-msg').textContent   = msg;
+  document.getElementById('modal-ok').onclick = ()=>{ closeModal(); cb(); };
+  document.getElementById('modal-cancel').onclick = closeModal;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+// ════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function fmtDateShort(iso) {
+  return new Date(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'});
+}
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.textContent = msg;
+  Object.assign(el.style,{position:'fixed',bottom:'90px',left:'50%',transform:'translateX(-50%)',background:'#1a2e1a',color:'#a0c4a0',padding:'8px 18px',borderRadius:'20px',fontSize:'0.75rem',zIndex:'5000',fontFamily:"'Space Mono',monospace",border:'1px solid #2a4a2a',whiteSpace:'nowrap',transition:'opacity 0.3s'});
+  document.body.appendChild(el);
+  setTimeout(()=>{el.style.opacity='0';setTimeout(()=>el.remove(),300);},2500);
+}
+
+// ════════════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════════════
+async function boot() {
+  // Show loading while we attempt Firebase connection
+  document.querySelector('#loading span').textContent = 'Connecting…';
+
+  // Attempt Firebase if config is saved
+  if (fbConfig) {
+    setFbStatus('wait', 'connecting…');
+    await connectFirebase();
+  } else {
+    setFbStatus('wait', 'no db — tap to setup');
+  }
+
+  await loadShared();
+  initMap();
+  initGPS();
+  initSearch();
+  myPins.forEach(p => addPinMarker(p));
+  setTimeout(renderGrid, 500);
+}
+boot();
+
+// Firebase config is hardcoded above — no setup prompt needed
+
+// SERVICE WORKER (PWA)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./survey-sw.js')
+      .then(r=>console.log('Survey SW registered:', r.scope))
+      .catch(e=>console.warn('Survey SW failed:', e));
+  });
+}
+</script>
+</body>
+</html>
