@@ -481,6 +481,31 @@ function saveFbConfig() {
 
 async function connectFirebase() {
   if (!fbConfig) return false;
+
+  // The Firebase SDK loads via <script type="module">, which executes
+  // asynchronously — wait (poll) until window._initFirebase is defined.
+  if (typeof window._initFirebase !== 'function') {
+    setFbStatus('wait', 'loading sdk…');
+    const ready = await new Promise(resolve => {
+      let tries = 0;
+      const iv = setInterval(() => {
+        tries++;
+        if (typeof window._initFirebase === 'function') {
+          clearInterval(iv);
+          resolve(true);
+        } else if (tries > 100) { // ~10s timeout
+          clearInterval(iv);
+          resolve(false);
+        }
+      }, 100);
+    });
+    if (!ready) {
+      setFbStatus('err', 'SDK failed to load');
+      fbOnline = false;
+      return false;
+    }
+  }
+
   return new Promise(resolve => {
     window._fbReadyCb = async (err) => {
       if (err || !window._fbReady) {
