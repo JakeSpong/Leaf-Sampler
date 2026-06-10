@@ -1,4 +1,4 @@
-const CACHE = 'ukgrid-v4';
+const CACHE = 'ukgrid-v6';
 const PRECACHE = [
   './survey-grid.html',
   './survey-manifest.json',
@@ -24,7 +24,18 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  // Only handle GET requests — Firestore uses POST/streaming which the
+  // Cache API can't store, and shouldn't be intercepted anyway.
+  if (e.request.method !== 'GET') return;
+
   const url = new URL(e.request.url);
+  // Skip Firestore/Google API traffic entirely — let it go straight to network
+  if (url.hostname.includes('firestore.googleapis.com') ||
+      url.hostname.includes('googleapis.com') ||
+      url.hostname.includes('gstatic.com')) {
+    return;
+  }
+
   // Network-first for tiles, cache-first for everything else
   if (url.hostname.includes('tile.openstreetmap.org') || url.hostname.includes('nominatim.openstreetmap.org')) {
     e.respondWith(

@@ -22,7 +22,7 @@
 <script type="module">
 import { initializeApp }         from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteField,
-         collection, getDocs, onSnapshot }
+         collection, getDocs, addDoc, onSnapshot, query, limit }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 // Expose to global scope so non-module code can use it
@@ -43,7 +43,10 @@ window._initFirebase = function(config) {
     window._fsDeleteField = ()             => deleteField();
     window._fsCollection = (path)          => collection(db, path);
     window._fsGetDocs    = (ref)           => getDocs(ref);
+    window._fsAddDoc     = (collRef, data) => addDoc(collRef, data);
     window._fsOnSnapshot = (ref, cb)       => onSnapshot(ref, cb);
+    window._fsQuery      = (collRef, ...c) => query(collRef, ...c);
+    window._fsLimit      = (n)             => limit(n);
 
     window._fbReady = true;
     console.log('Firebase initialised');
@@ -514,17 +517,16 @@ async function connectFirebase() {
         resolve(false);
         return;
       }
-      // Test connection with a small read
+      // Test connection with a read-only query (rules allow read:true)
       try {
-        const ref = window._fsDoc('_meta/ping');
-        await window._fsSetDoc(ref, { t: Date.now() }, { merge: true });
+        const q = window._fsQuery(window._fsCollection('pins'), window._fsLimit(1));
+        await window._fsGetDocs(q);
         fbOnline = true;
         setFbStatus('ok', 'connected');
-        // Start live listener for cell counts
-        startCountsListener();
+        startPinsListener();
         resolve(true);
       } catch(e) {
-        console.warn('Firestore test write failed:', e);
+        console.warn('Firestore test read failed:', e);
         setFbStatus('err', e.code === 'permission-denied' ? 'Check Firestore rules' : 'Offline');
         fbOnline = false;
         resolve(false);
@@ -538,20 +540,24 @@ async function connectFirebase() {
   });
 }
 
-function startCountsListener() {
+// Live listener on the 'pins' collection — every pin is its own document.
+// Recomputes cellCounts and allPins whenever any user adds a pin.
+function startPinsListener() {
   if (!fbOnline) return;
   try {
-    const ref = window._fsDoc('shared/cellCounts');
+    const ref = window._fsCollection('pins');
     window._fsOnSnapshot(ref, snap => {
-      if (snap.exists()) {
-        cellCounts = snap.data();
-        renderGrid();
-      }
-    });
-    const pinsRef = window._fsDoc('shared/allPins');
-    window._fsOnSnapshot(pinsRef, snap => {
-      if (snap.exists()) allPins = Object.values(snap.data());
-    });
+      const counts = {};
+      const all = [];
+      snap.forEach(docSnap => {
+        const d = docSnap.data();
+        all.push(d);
+        if (d.cellId) counts[d.cellId] = (counts[d.cellId] || 0) + 1;
+      });
+      cellCounts = counts;
+      allPins = all;
+      renderGrid();
+    }, err => console.warn('Pins listener error:', err));
   } catch(e) { console.warn('Listener error:', e); }
 }
 
@@ -565,8 +571,11 @@ function closeFbSetup() {
 }
 
 // ════════════════════════════════════════════════════════════
-// STORAGE  (Firebase primary, localStorage fallback)
+// STORAGE  (Firebase primary — append-only; localStorage fallback)
 // ════════════════════════════════════════════════════════════
+// loadShared: initial fetch. The live listener (startPinsListener) keeps
+// cellCounts/allPins updated afterwards, so this just provides a fallback
+// for the very first render and for non-Firebase contexts.
 async function loadShared() {
   // Try window.storage first (Claude context)
   if (window.storage) {
@@ -579,13 +588,17 @@ async function loadShared() {
       return;
     } catch(e) {}
   }
-  // Try Firebase
+  // Firebase: one-off read of the pins collection
   if (fbOnline) {
     try {
-      const snap = await window._fsGetDoc(window._fsDoc('shared/cellCounts'));
-      cellCounts = snap.exists() ? snap.data() : {};
-      const psnap = await window._fsGetDoc(window._fsDoc('shared/allPins'));
-      allPins = psnap.exists() ? Object.values(psnap.data()) : [];
+      const snap = await window._fsGetDocs(window._fsCollection('pins'));
+      const counts = {}; const all = [];
+      snap.forEach(docSnap => {
+        const d = docSnap.data();
+        all.push(d);
+        if (d.cellId) counts[d.cellId] = (counts[d.cellId]||0)+1;
+      });
+      cellCounts = counts; allPins = all;
       return;
     } catch(e) { console.warn('Firebase load failed, using localStorage:', e); }
   }
@@ -598,48 +611,36 @@ async function loadShared() {
   } catch(e) { cellCounts = {}; allPins = []; }
 }
 
-async function saveShared() {
-  // Merge this user's pins into shared record
-  const existCodes = new Set(allPins.map(p => p.code));
-  myPins.forEach(p => { if (!existCodes.has(p.code)) allPins.push(p); });
-
-  // window.storage (Claude context)
+// Adds ONE pin as a new document. With the Firestore rules below this is
+// the only operation permitted on the 'pins' collection — no update/delete.
+async function addPinShared(pin) {
+  // window.storage (Claude context) — keep legacy aggregate format
   if (window.storage) {
     try {
-      await window.storage.set(COUNTS_KEY,   JSON.stringify(cellCounts), true);
-      await window.storage.set(ALL_PINS_KEY,  JSON.stringify(allPins),   true);
+      const existCodes = new Set(allPins.map(p => p.code));
+      if (!existCodes.has(pin.code)) allPins.push(pin);
+      cellCounts[pin.cellId] = (cellCounts[pin.cellId]||0) + 1;
+      await window.storage.set(COUNTS_KEY,  JSON.stringify(cellCounts), true);
+      await window.storage.set(ALL_PINS_KEY, JSON.stringify(allPins),   true);
       return;
     } catch(e) {}
   }
-  // Firebase
+  // Firebase: create-only document
   if (fbOnline) {
     try {
-      await window._fsSetDoc(window._fsDoc('shared/cellCounts'), cellCounts);
-      // Store allPins as a map keyed by code (Firestore document, not array)
-      const pinsMap = {};
-      allPins.forEach(p => { pinsMap[p.code] = p; });
-      await window._fsSetDoc(window._fsDoc('shared/allPins'), pinsMap);
+      await window._fsAddDoc(window._fsCollection('pins'), pin);
+      // cellCounts/allPins will update via the live listener
       return;
-    } catch(e) { console.warn('Firebase save failed, falling back:', e); }
+    } catch(e) {
+      console.warn('Firebase add failed, falling back to local:', e);
+    }
   }
   // localStorage fallback
+  const existCodes = new Set(allPins.map(p => p.code));
+  if (!existCodes.has(pin.code)) allPins.push(pin);
+  cellCounts[pin.cellId] = (cellCounts[pin.cellId]||0) + 1;
   localStorage.setItem(COUNTS_KEY,  JSON.stringify(cellCounts));
   localStorage.setItem(ALL_PINS_KEY, JSON.stringify(allPins));
-}
-
-async function deleteFromShared(code) {
-  allPins = allPins.filter(p => p.code !== code);
-  if (fbOnline) {
-    try {
-      const pinsRef = window._fsDoc('shared/allPins');
-      await window._fsUpdateDoc(pinsRef, { [code]: window._fsDeleteField() });
-    } catch(e) { console.warn('Firebase delete failed:', e); }
-  }
-  if (window.storage) {
-    try { await window.storage.set(ALL_PINS_KEY, JSON.stringify(allPins), true); } catch(e){}
-  } else {
-    localStorage.setItem(ALL_PINS_KEY, JSON.stringify(allPins));
-  }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -737,9 +738,8 @@ async function dropPin(lat, lng) {
   const pin  = { code, lat, lng, date:new Date().toISOString(), cellId:cid };
   myPins.unshift(pin);
   localStorage.setItem(GRID_KEY, JSON.stringify(myPins));
-  cellCounts[cid] = (cellCounts[cid]||0)+1;
-  await saveShared();
-  renderGrid();
+  await addPinShared(pin);
+  if (!fbOnline) renderGrid(); // Firebase path re-renders via the live listener
   addPinMarker(pin);
   showCodeToast(code);
   if (showMyPins) renderPinsDrawer();
@@ -786,8 +786,8 @@ function buildPinPopup(pin) {
 // DELETE PIN
 // ════════════════════════════════════════════════════════════
 function confirmDelete(code) {
-  openModal('Delete pin?',
-    `Remove pin ${code}? This will reduce the count for its grid square.`,
+  openModal('Remove from your list?',
+    `This removes pin ${code} from your personal list only. The shared grid record is permanent and cannot be deleted (counts towards the grid colour for everyone).`,
     ()=>deletePin(code));
 }
 
@@ -796,19 +796,12 @@ async function deletePin(code) {
   if (!pin) return;
   myPins = myPins.filter(p=>p.code!==code);
   localStorage.setItem(GRID_KEY, JSON.stringify(myPins));
-  if (cellCounts[pin.cellId]) {
-    cellCounts[pin.cellId] = Math.max(0, cellCounts[pin.cellId]-1);
-    if (!cellCounts[pin.cellId]) delete cellCounts[pin.cellId];
-  }
-  // Remove from shared storage (Firebase or fallback)
-  await deleteFromShared(code);
-  // Save updated counts
-  await saveShared();
+  // Note: shared pin record + cellCounts are permanent (Firestore rules deny delete)
+  // and remain unchanged — they still count towards the grid colour for all users.
   if (pinMarkers[code]) { map.removeLayer(pinMarkers[code]); delete pinMarkers[code]; }
   map.closePopup();
-  renderGrid();
   if (showMyPins) renderPinsDrawer();
-  showToast('Pin deleted');
+  showToast('Removed from your list');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -937,12 +930,12 @@ function exportCSV(mode) {
 }
 
 function confirmClearAll() {
-  openModal('Clear all my pins?',
-    'This permanently removes all your pins from this device and reduces shared grid counts.',
+  openModal('Clear my pin list?',
+    'This removes all pins from your personal list on this device. Shared grid records remain permanent and unaffected.',
     async ()=>{
       for (const p of [...myPins]) await deletePin(p.code);
       closeAdmin(); openAdmin();
-      showToast('All pins cleared');
+      showToast('Your pin list cleared');
     });
 }
 
