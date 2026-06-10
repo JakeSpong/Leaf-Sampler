@@ -308,6 +308,7 @@ window._initFirebase = function(config) {
     <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,255,255,0.15);"></div>0 pins</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#ffd8a8;opacity:0.85;"></div>1–9 pins</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#52a354;opacity:0.85;"></div>10+ pins</div>
+    <div class="legend-item"><div style="width:10px;height:10px;border-radius:50%;background:#52a354;border:1.5px solid #0f1a0f;"></div>sample</div>
   </div>
   <div id="pins-drawer"></div>
 </div>
@@ -557,6 +558,7 @@ function startPinsListener() {
       cellCounts = counts;
       allPins = all;
       renderGrid();
+      renderOtherPinMarkers();
     }, err => console.warn('Pins listener error:', err));
   } catch(e) { console.warn('Listener error:', e); }
 }
@@ -762,6 +764,36 @@ function addPinMarker(pin) {
   const m = L.marker([pin.lat,pin.lng],{icon:makePinIcon(pin.code)}).addTo(map);
   m.bindPopup(()=>buildPinPopup(pin));
   pinMarkers[pin.code] = m;
+}
+
+// ── Other users' pins — shown as small dots so everyone can see where
+// samples have already been taken without zooming in to grid level.
+let otherPinsLayer = null;
+function makeOtherPinIcon() {
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:10px;height:10px;border-radius:50%;background:#52a354;border:1.5px solid #0f1a0f;box-shadow:0 1px 4px rgba(0,0,0,0.5);"></div>`,
+    iconSize:[10,10], iconAnchor:[5,5]
+  });
+}
+
+function renderOtherPinMarkers() {
+  if (!map) return;
+  if (!otherPinsLayer) otherPinsLayer = L.layerGroup().addTo(map);
+  otherPinsLayer.clearLayers();
+
+  const myCodes = new Set(myPins.map(p=>p.code));
+  allPins.forEach(pin => {
+    if (myCodes.has(pin.code)) return; // skip own pins (shown with full marker already)
+    const m = L.marker([pin.lat, pin.lng], { icon: makeOtherPinIcon(), interactive:true });
+    m.bindPopup(`
+      <div class="popup-code" style="font-size:0.85rem;">${pin.code}</div>
+      <div class="popup-row">📍 ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}</div>
+      <div class="popup-row">📅 ${fmtDate(pin.date)}</div>
+      <div class="popup-row" style="color:#4a8a6a;margin-top:4px;">Sample by another user</div>
+    `);
+    m.addTo(otherPinsLayer);
+  });
 }
 
 function buildPinPopup(pin) {
@@ -1086,7 +1118,7 @@ async function boot() {
   initGPS();
   initSearch();
   myPins.forEach(p => addPinMarker(p));
-  setTimeout(renderGrid, 500);
+  setTimeout(() => { renderGrid(); renderOtherPinMarkers(); }, 500);
 }
 boot();
 
