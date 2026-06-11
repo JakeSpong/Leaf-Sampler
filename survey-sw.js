@@ -1,4 +1,4 @@
-const CACHE = 'ukgrid-v11';
+const CACHE = 'ukgrid-v12';
 const PRECACHE = [
   './index.html',
   './survey-manifest.json',
