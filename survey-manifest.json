@@ -2,7 +2,7 @@
   "name": "UK Survey Grid",
   "short_name": "UK·GRID",
   "description": "Drop pins on a 1km UK grid for field survey data collection",
-  "start_url": "./survey-grid.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f1a0f",
