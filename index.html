@@ -115,6 +115,8 @@ window._initFirebase = function(config) {
 
   #locate-btn { position:absolute; bottom:24px; right:14px; width:44px; height:44px; background:var(--accent); border:none; border-radius:50%; color:#fff; font-size:1.2rem; cursor:pointer; box-shadow:var(--shadow); z-index:900; display:flex; align-items:center; justify-content:center; transition:background 0.2s; }
   #locate-btn:hover { background:#135429; }
+  #layer-btn { position:absolute; bottom:78px; right:14px; width:44px; height:44px; background:#1a2e1a; border:1px solid #2a3d2a; border-radius:50%; color:var(--paper); font-size:1.2rem; cursor:pointer; box-shadow:var(--shadow); z-index:900; display:flex; align-items:center; justify-content:center; transition:background 0.2s; }
+  #layer-btn:hover { background:#243d24; border-color:var(--accent); }
 
   #pin-banner { position:absolute; top:12px; left:50%; transform:translateX(-50%); background:var(--accent); color:#fff; border-radius:20px; padding:7px 18px; font-size:0.75rem; z-index:900; display:none; white-space:nowrap; box-shadow:var(--shadow); pointer-events:none; }
   #pin-banner.visible { display:block; }
@@ -285,6 +287,7 @@ window._initFirebase = function(config) {
   <div id="map"></div>
   <div id="pin-banner">📍 Tap anywhere on the map to drop a pin</div>
   <button id="locate-btn" title="Go to my location">◎</button>
+  <button id="layer-btn" title="Switch to satellite view">🛰</button>
   <div id="code-toast">
     <div class="ct-label">Pin code generated</div>
     <div class="ct-code" id="ct-code-val">—</div>
@@ -425,6 +428,8 @@ let userLatLng = null;
 let pinMode    = false;
 let showMyPins = false;
 let map, userMarker;
+let streetLayer, satLayer;
+let satelliteOn = false;
 let gridLayer  = null;
 let pinMarkers = {};
 let lastCode   = '';
@@ -670,12 +675,17 @@ function generateCode() {
 // ════════════════════════════════════════════════════════════
 function initMap() {
   map = L.map('map', { zoomControl:true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 }).addTo(map);
+
+  streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19 });
+  satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'Tiles © Esri', maxZoom:19 });
+
+  streetLayer.addTo(map);
   map.setView([54.5, -2.5], 6);
   gridLayer = L.layerGroup().addTo(map);
   map.on('moveend zoomend', debounce(renderGrid, 200));
   map.on('click', onMapClick);
   document.getElementById('locate-btn').onclick  = goToUser;
+  document.getElementById('layer-btn').onclick   = toggleSatellite;
   initAdminAccess();
   document.getElementById('add-pin-btn').onclick = togglePinMode;
   document.getElementById('my-pins-btn').onclick = toggleMyPins;
@@ -1093,6 +1103,22 @@ function onGPSErr(e) {
 function goToUser() {
   if (userLatLng) map.flyTo([userLatLng.lat,userLatLng.lng],14,{animate:true,duration:1});
   else showToast('⚠ GPS not available yet');
+}
+
+function toggleSatellite() {
+  satelliteOn = !satelliteOn;
+  const btn = document.getElementById('layer-btn');
+  if (satelliteOn) {
+    map.removeLayer(streetLayer);
+    satLayer.addTo(map);
+    btn.textContent = '🗺';
+    btn.title = 'Switch to map view';
+  } else {
+    map.removeLayer(satLayer);
+    streetLayer.addTo(map);
+    btn.textContent = '🛰';
+    btn.title = 'Switch to satellite view';
+  }
 }
 
 // ════════════════════════════════════════════════════════════

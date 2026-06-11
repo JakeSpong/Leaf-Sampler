@@ -1,4 +1,4 @@
-const CACHE = 'ukgrid-v12';
+const CACHE = 'ukgrid-v13';
 const PRECACHE = [
   './index.html',
   './survey-manifest.json',
@@ -37,7 +37,7 @@ self.addEventListener('fetch', e => {
   }
 
   // Network-first for tiles, cache-first for everything else
-  if (url.hostname.includes('tile.openstreetmap.org') || url.hostname.includes('nominatim.openstreetmap.org')) {
+  if (url.hostname.includes('tile.openstreetmap.org') || url.hostname.includes('nominatim.openstreetmap.org') || url.hostname.includes('arcgisonline.com')) {
     e.respondWith(
       fetch(e.request).then(r => {
         const c = r.clone();
