@@ -677,9 +677,9 @@ function initMap() {
   map.on('moveend zoomend', debounce(renderGrid, 200));
   map.on('click', onMapClick);
   document.getElementById('locate-btn').onclick  = goToUser;
+  initAdminAccess();
   document.getElementById('add-pin-btn').onclick = togglePinMode;
   document.getElementById('my-pins-btn').onclick = toggleMyPins;
-  document.getElementById('admin-btn').onclick   = openAdmin;
   document.getElementById('ct-copy-btn').onclick = copyLastCode;
   document.getElementById('ct-doc-btn').onclick  = openDocWithCode;
   document.getElementById('ct-dismiss-btn').onclick = dismissCodeToast;
@@ -915,6 +915,33 @@ function saveGdocUrl() {
 // ════════════════════════════════════════════════════════════
 // ADMIN PANEL
 // ════════════════════════════════════════════════════════════
+const ADMIN_PASSCODE = 'leaf2025'; // change this to your own passcode
+
+function initAdminAccess() {
+  const logo = document.querySelector('.logo');
+  let pressTimer;
+  const start = () => { pressTimer = setTimeout(promptAdmin, 900); };
+  const cancel = () => clearTimeout(pressTimer);
+  logo.addEventListener('touchstart', start, {passive:true});
+  logo.addEventListener('touchend', cancel);
+  logo.addEventListener('touchmove', cancel);
+  logo.addEventListener('mousedown', start);
+  logo.addEventListener('mouseup', cancel);
+  logo.addEventListener('mouseleave', cancel);
+  logo.style.userSelect = 'none';
+  logo.style.webkitUserSelect = 'none';
+}
+
+function promptAdmin() {
+  const code = prompt('Admin passcode:');
+  if (code === null) return;
+  if (code === ADMIN_PASSCODE) {
+    openAdmin();
+  } else {
+    showToast('⚠ Incorrect passcode');
+  }
+}
+
 function openAdmin() {
   // Populate URL field
   document.getElementById('gdoc-url-input').value = gdocUrl;
